@@ -2,7 +2,6 @@ torch
 argparse
 numpy
 transformers
-json
 datasets<3.0
 ipywidgets
 transformers[torch]
