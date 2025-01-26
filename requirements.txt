@@ -1,0 +1,8 @@
+torch
+numpy
+transformers
+json
+datasets<3
+ipywidgets
+transformers[torch]
+seqeval
