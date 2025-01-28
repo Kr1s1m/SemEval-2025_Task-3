@@ -138,4 +138,4 @@ def train_soft_gating(jsonl_path, embed_dim=8, num_epochs=1):
 if __name__ == "__main__":
     # Example usage
     # Suppose you have 'data.jsonl' in the same folder
-    train_soft_gating(jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=33)
+    train_soft_gating(jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
