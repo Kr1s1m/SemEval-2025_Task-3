@@ -6,3 +6,4 @@ datasets<3.0
 ipywidgets
 transformers[torch]
 seqeval
+sentence_transformers
