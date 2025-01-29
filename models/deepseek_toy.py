@@ -11,7 +11,7 @@ CONFIG = {
     "num_layers": 2,  # Number of LSTM layers
     "dropout": 0.3,
     "batch_size": 32,
-    "num_epochs": 1,
+    "num_epochs": 33,
     "learning_rate": 1e-3,
     "seq_length": 64  # Max sequence length
 }
@@ -148,6 +148,7 @@ def train_model(file_path):
 
 # Inference and Span Detection
 def detect_hallucinations(model, sample_data):
+    # Extract features and get model prediction
     features = HallucinationDataset.extract_features(sample_data)
     with torch.no_grad():
         reconstructed = model(torch.tensor(features).unsqueeze(0).float())
@@ -155,25 +156,59 @@ def detect_hallucinations(model, sample_data):
     # Calculate reconstruction error
     error = torch.abs(torch.tensor(features) - reconstructed.squeeze(0)).mean(dim=-1)
 
-    # Dynamic thresholding
+    # Dynamic threshold calculation
     threshold = error.mean() + 2 * error.std()
-    mask = error > threshold
 
-    # Group consecutive tokens
+    # Convert errors to probabilities using sigmoid
+    probabilities = torch.sigmoid((error - threshold) * 2.0)  # Scale factor 2.0
+
+    # Identify spans with consecutive high probabilities
     spans = []
     current_span = None
-    for i, val in enumerate(mask.numpy()):
-        if val:
+    for i in range(len(probabilities)):
+        if probabilities[i] > 0.5:  # Probability threshold
             if current_span is None:
-                current_span = {'start': i, 'end': i}
+                current_span = {
+                    'start': i,
+                    'end': i,
+                    'prob_sum': probabilities[i].item(),
+                    'token_indices': [i]
+                }
             else:
                 current_span['end'] = i
+                current_span['prob_sum'] += probabilities[i].item()
+                current_span['token_indices'].append(i)
         else:
             if current_span is not None:
-                spans.append(current_span)
+                # Calculate span statistics
+                span_prob = current_span['prob_sum'] / len(current_span['token_indices'])
+                spans.append({
+                    'input_text': sample_data['model_input'],
+                    'output_text': sample_data['model_output_text'],
+                    'start_token_idx': current_span['start'],
+                    'end_token_idx': current_span['end'],
+                    'probability': round(span_prob, 4),
+                    'tokens': [sample_data['model_output_tokens'][idx]
+                               for idx in current_span['token_indices']],
+                    'mean_error': error[current_span['token_indices']].mean().item(),
+                    'token_count': len(current_span['token_indices'])
+                })
                 current_span = None
+
+    # Add final span if exists
     if current_span is not None:
-        spans.append(current_span)
+        span_prob = current_span['prob_sum'] / len(current_span['token_indices'])
+        spans.append({
+            'input_text': sample_data['model_input'],
+            'output_text': sample_data['model_output_text'],
+            'start_token_idx': current_span['start'],
+            'end_token_idx': current_span['end'],
+            'probability': round(span_prob, 4),
+            'tokens': [sample_data['model_output_tokens'][idx]
+                       for idx in current_span['token_indices']],
+            'mean_error': error[current_span['token_indices']].mean().item(),
+            'token_count': len(current_span['token_indices'])
+        })
 
     return spans
 
