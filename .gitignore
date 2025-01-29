@@ -10,6 +10,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Visial Studio
+.vs/
+
 # Distribution / packaging
 .Python
 build/

@@ -79,14 +79,14 @@ class HallucinationModel(nn.Module):
         )
 
         self.decoder = nn.LSTM(
-            input_size=config["hidden_dim"] * 1,
+            input_size=config["hidden_dim"] * 2,
             hidden_size=config["hidden_dim"],
             num_layers=1,
             batch_first=True
         )
 
         self.attention = nn.MultiheadAttention(
-            embed_dim=config["hidden_dim"],
+            embed_dim=config["hidden_dim"] * 2,
             num_heads=4,
             dropout=config["dropout"]
         )
