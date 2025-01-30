@@ -18,7 +18,7 @@ model = SentenceTransformer("all-mpnet-base-v2")
 # to embed the input and output tokens. Here we just create random vectors
 # to illustrate the concept.
 
-def embed_input_text(text, embed_dim=8):
+def embed_input_text(text):
     """
     Returns a random embedding for the input text.
     Real-world scenario: use a pretrained model or any embedding approach.
@@ -28,7 +28,7 @@ def embed_input_text(text, embed_dim=8):
     return torch.from_numpy(encoded)
 
 
-def embed_output_token(token, embed_dim=8):
+def embed_output_token(token):
     """
     Returns a random embedding for a single token in the output.
     Real-world scenario: use a pretrained model's token embedding, etc.
@@ -103,9 +103,9 @@ class GatingNetwork(nn.Module):
 # -------------------------------
 # 3. MAIN TRAINING LOOP (TOY)
 # -------------------------------
-#def train_soft_gating(jsonl_path, embed_dim=8, num_epochs=1):
+#def train_soft_gating(data, embed_dim=8, num_epochs=1):
 #    """
-#    Reads data from jsonl_path, trains a gating network for soft masking.
+#    Reads data from data, trains a gating network for soft masking.
 #    Minimizes the L2 distance between the 'masked output embedding' and
 #    the 'input text embedding' as a toy 'consistency loss'.
 #    """
@@ -113,7 +113,7 @@ class GatingNetwork(nn.Module):
 #    optimizer = optim.Adam(gating_net.parameters(), lr=0.01)
 #
 #    # We'll store the dataset in memory for simplicity
-#    dataset = from_jsonl(jsonl_path)
+#    dataset = from_jsonl(data)
 #
 #   for epoch in range(num_epochs):
 #        print(f"Epoch {epoch + 1}/{num_epochs}")
@@ -195,7 +195,7 @@ def get_training_results(gating_net, dataset):
 
 
 def train_with_entropy(
-    jsonl_path,
+    data,
     embed_dim=8,
     num_epochs=3,
     lambda_penalty=0.01,
@@ -211,7 +211,7 @@ def train_with_entropy(
     gating_net = GatingNetwork()
     optimizer = optim.Adam(gating_net.parameters(), learning_rate)
 
-    dataset = from_jsonl(jsonl_path)
+    dataset = data
 
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -359,11 +359,19 @@ def calculate_error(gating_model, labeled_jsonl_path):
 
 
 if __name__ == "__main__":
-    # Example usage
-    # Suppose you have 'data.jsonl' in the same folder
-    #train_soft_gating(jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
+    # Example usage of soft gating
+    #train_soft_gating(data="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
+
+    sources = [
+        'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
+        'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl'
+    ]
+    data_sets = []
+    for s in sources:
+        data_sets += from_jsonl(s)
+
     gating_model = train_with_entropy(
-        jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl",
+        data=data_sets,
         embed_dim=768,
         num_epochs=1,
         lambda_penalty=1.4,
