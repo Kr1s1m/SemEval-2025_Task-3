@@ -1,41 +1,28 @@
 #!/usr/bin/env python3
 
+import os
 import json
+import sentence_transformers
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+from datetime import datetime
 from sentence_transformers import SentenceTransformer
 
 
-model = SentenceTransformer("all-mpnet-base-v2")
+sentence_transformer_model = SentenceTransformer("all-mpnet-base-v2")
 
 
 # -----------------------------
-# 1. DUMMY EMBEDDING FUNCTIONS
+# 1. EMBEDDING FUNCTIONS
 # -----------------------------
-# In a real system, you might load a sentence transformer or a pretrained LM
-# to embed the input and output tokens. Here we just create random vectors
-# to illustrate the concept.
-
 def embed_input_text(text):
-    """
-    Returns a random embedding for the input text.
-    Real-world scenario: use a pretrained model or any embedding approach.
-    """
-    # For demonstration, we seed by the text hash so it's consistent per example
-    encoded = model.encode(text)
-    return torch.from_numpy(encoded)
+    return torch.from_numpy(sentence_transformer_model.encode(text))
 
 
 def embed_output_token(token):
-    """
-    Returns a random embedding for a single token in the output.
-    Real-world scenario: use a pretrained model's token embedding, etc.
-    """
-    # We'll do the same seeded approach for consistency
-    encoded = model.encode(token)
-    return torch.from_numpy(encoded)
+    return torch.from_numpy(sentence_transformer_model.encode(token))
 
 
 def from_jsonl(jsonl_path):
@@ -163,10 +150,6 @@ class GatingNetwork(nn.Module):
 #        for token, gp in zip(output_tokens, gating_probs_np):
 #            print(f"  {token} => gating_prob={gp:.3f}")
 
-
-##### toy No2
-
-
 def embed_to_distribution(embedding):
     eps = 1e-8
     exp_emb = torch.exp(embedding)
@@ -194,13 +177,17 @@ def get_training_results(gating_net, dataset):
     return result
 
 
+# ----------------------------------
+# 3. MAIN TRAINING LOOP V2 (ENTROPY)
+# ----------------------------------
+
 def train_with_entropy(
-    data,
-    embed_dim=8,
+    dataset,
     num_epochs=3,
     lambda_penalty=0.01,
     lambda_entropy=0.01,
-    learning_rate=0.01
+    learning_rate=0.01,
+    embed_dim=768
 ):
     """
     Training loop:
@@ -211,24 +198,22 @@ def train_with_entropy(
     gating_net = GatingNetwork()
     optimizer = optim.Adam(gating_net.parameters(), learning_rate)
 
-    dataset = data
-
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         total_loss = 0.0
 
-        for (id, model_input, output_tokens, output_logits) in dataset:
+        for (_, model_input, output_tokens, output_logits) in dataset:
             log_probs = torch.tensor(output_logits, dtype=torch.float)
             gating_probs = gating_net(log_probs)
 
             # Embed input text => distribution
-            input_embed = embed_input_text(model_input, embed_dim=embed_dim)
+            input_embed = embed_input_text(model_input)
             input_dist = embed_to_distribution(input_embed)
 
             # Soft-mask output
             masked_output_embed = torch.zeros(embed_dim)
             for i, token in enumerate(output_tokens):
-                token_embed = embed_output_token(token, embed_dim=embed_dim)
+                token_embed = embed_output_token(token)
                 keep_weight = (1 - gating_probs[i])
                 masked_output_embed += keep_weight * token_embed
 
@@ -316,21 +301,27 @@ def spread_gating_probs(
 
     return new_probs
 
+def split_list(a_list):
+    half = len(a_list)//2
+    return a_list[:half], a_list[half:]
+
 def spread_all(zipped):
     new_zipped = zipped.copy()
     for (id, tokens, gating_probs) in zipped:
-        new_zipped.append((tokens, spread_gating_probs(gating_probs)))
+        new_zipped.append((id, tokens, spread_gating_probs(gating_probs)))
 
+    #returns a list which contains first the original zipped and then with spread probs
     return new_zipped
     
-def generate_spans(zipped):
-    spans = []
+def generate_span_groups(zipped, threshold):
+    span_groups = []
     for (id, tokens, gating_probs) in zipped:
         i = 0
         span = None
+        span_group = {'id': id, 'spans': []}
         for token, gating_prob in zip(tokens, gating_probs):
-            if gating_prob >= 0.5:
-                if span == None:
+            if gating_prob >= threshold:
+                if span == None:                  
                     span = {
                         'start': i,
                         'end': i,
@@ -344,18 +335,88 @@ def generate_spans(zipped):
             else:
                 if span is not None:
                     span['prob'] /= (span['end'] - span['start']) + 1
-                    spans.append(span)
+                    span_group['spans'].append(span)
                     span = None
             i+=1
+        span_groups.append(span_group)
 
-    return spans
+    return span_groups
 
-def calculate_error(gating_model, labeled_jsonl_path):
+def generate_predictions(span_groups):
+    predictions = []
+    for span_group in span_groups:
+        prediction = {
+            'id': span_group['id'],
+            'soft_labels': [],
+            'hard_labels': []
+        }
+        for span in span_group['spans']:
+            if not span: 
+                continue
+            soft_label = {
+                'start': span['start'],
+                'end': span['end'],
+                'prob': float(span['prob'])
+            }
+            prediction['soft_labels'].append(soft_label)
+            if(span['prob'] >= 0.5):
+                hard_label = [soft_label['start'], soft_label['end']]
+                prediction['hard_labels'].append(hard_label)
+        predictions.append(prediction)
+    
+    #returns predictions_classic, predictions_spread tuple of lists - check spread_all and split_list
+    return split_list(predictions)
+
+def get_unique_filename(filename, t_cfg):
+    base, ext = os.path.splitext(filename)
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    new_filename = f"{base}-ne_{t_cfg['num_epochs']}_lp_{t_cfg['lambda_penalty']}_le_{t_cfg['lambda_entropy']}_lr_{t_cfg['learning_rate']}-{current_time}{ext}"
+    return new_filename
+
+def export_to_jsonl(predictions, jsonl_path):
+    with open(jsonl_path, 'w', encoding='utf-8') as f:
+        for prediction in predictions:
+            json_line = json.dumps(prediction)
+            f.write(json_line + '\n')
+                
+
+def calculate_error(gating_model, labeled_jsonl_path, threshold):
+    error = -1.0
+    correct = 0.0
+    #generate gating probs
     labeled_dataset = from_jsonl(labeled_jsonl_path)
     zipped = get_training_results(gating_model, labeled_dataset)
-    spans = generate_spans(zipped)
-    lables = labels_from_jsonl(labeled_jsonl_path)
-    for (soft_labels, hard_labels) in lables:
+    span_groups = generate_span_groups(zipped, threshold)
+
+    silver_labels = generate_predictions(span_groups)
+    gold_labels = labels_from_jsonl(labeled_jsonl_path)
+    if len(silver_labels) == len(gold_labels):
+        for silver_label, (id, soft_labels, hard_labels) in zip(silver_labels, gold_labels):
+            for silver_span, gold_span in zip(silver_label['soft_labels'], soft_labels):
+                gold_len = gold_span['start']-gold_span['end']+1
+                if silver_span['start'] == gold_span['start']:
+                    if silver_span['end'] == gold_span['end']:
+                        correct += 1.0
+                    else:
+                        correct += 1.0 - min(1.0, abs(silver_span['end']-gold_span['end']+1)/(gold_len))
+                elif silver_span['start'] > gold_span['start']:
+                    if silver_span['start'] > gold_span['end']:
+                        correct += 0.0
+                    elif silver_span['end'] > gold_span['end']:
+                        correct += 1.0 - min(1.0, abs(silver_span['start']-gold_span['end']+1)/(gold_len))
+                    else: #silver_span['end'] <= gold_span['end']
+                        correct += 1.0 - min(1.0, abs(silver_span['start']-silver_span['end']+1)/(gold_len))
+                else: #silver_span['start'] < gold_span['start']
+                    if silver_span['end'] < gold_span['start']:
+                        correct += 0.0
+                    elif silver_span['end'] <= gold_span['end']:
+                        correct += 1.0 - min(1.0, abs(gold_span['start']-silver_span['end']+1)/(gold_len))
+                    else: #silver_span['end'] > gold_span['end']
+                        correct += 1.0 - min(1.0, abs(silver_span['start']-silver_span['end']+1)/(gold_len))
+
+        error = correct / len(gold_labels)
+    return error
+
 
 
 if __name__ == "__main__":
@@ -366,20 +427,38 @@ if __name__ == "__main__":
         'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
         'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl'
     ]
-    data_sets = []
+    train_samples = []
     for s in sources:
-        data_sets += from_jsonl(s)
+        train_samples += from_jsonl(s)
+
+    train_config = {
+        'num_epochs': 2,
+        'lambda_penalty': 1.4,
+        'lambda_entropy': 1.5,
+        'learning_rate': 0.001
+    }
 
     gating_model = train_with_entropy(
-        data=data_sets,
-        embed_dim=768,
-        num_epochs=1,
-        lambda_penalty=1.4,
-        lambda_entropy=1.5,
-        learning_rate=0.001
+        train_samples,
+        train_config['num_epochs'],
+        train_config['lambda_penalty'],
+        train_config['lambda_entropy'],
+        train_config['learning_rate']
     )
-    test_samples = from_jsonl("data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl")
+
+    prob_threshold = 0.3
+
+    test_samples = from_jsonl("data_sets/validation/mushroom.en-val.v2.jsonl")
     zipped = get_training_results(gating_model, test_samples)
     zipped_spread = spread_all(zipped)
-    spans = generate_spans(zipped_spread)
-    print(spans)
+    span_groups = generate_span_groups(zipped_spread, prob_threshold)
+    predictions_classic, predictions_spread = generate_predictions(span_groups)
+    print(predictions_classic)
+    print(predictions_spread)
+
+    export_path = 'test/results/o1_toy/'
+    if not os.path.exists(export_path):
+        os.makedirs(export_path)
+
+    export_to_jsonl(predictions_classic, export_path+get_unique_filename("en-pred.jsonl", train_config))
+    export_to_jsonl(predictions_spread, export_path+get_unique_filename("en-pred_spread.jsonl", train_config))
