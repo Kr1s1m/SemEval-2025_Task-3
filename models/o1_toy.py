@@ -46,16 +46,40 @@ def from_jsonl(jsonl_path):
             if not data:
                 continue
             # Extract needed fields
+            lang = data.get("lang", "")
+            idx = 0
+            id = data.get("id", f"train-{lang.lower()}-{idx}")
             model_input = data.get("model_input", "")
             output_tokens = data.get("model_output_tokens", [])
             output_logits = data.get("model_output_logits", [])
             # Skip if invalid
             if not output_tokens or not output_logits:
                 continue
-            dataset.append((model_input, output_tokens, output_logits))
+            dataset.append((id, model_input, output_tokens, output_logits))
+            idx += 1
 
     return dataset
 
+def labels_from_jsonl(jsonl_path):
+    labels = []
+    with open(jsonl_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line.strip())
+            if not data:
+                continue
+            # Extract needed fields
+            lang = data.get("lang", "")
+            idx = 0
+            id = data.get("id", f"train-{lang.lower()}-{idx}")
+            soft_labels = data.get("soft_labels", [])
+            hard_labels = data.get("hard_labels", [])
+            # Skip if invalid
+            if not soft_labels or not hard_labels:
+                continue
+            labels.append((id, soft_labels, hard_labels))
+            idx += 1
+
+    return labels
 
 # -------------------------------------------------------------
 # 2. GATING NETWORK (maps log prob -> gating probability [0..1])
@@ -158,10 +182,10 @@ def binary_entropy(g):
 def get_training_results(gating_net, dataset):
     result = []
     gating_net.eval()
-    for (model_input, output_tokens, output_logits) in dataset:
+    for (id, model_input, output_tokens, output_logits) in dataset:
         log_probs = torch.tensor(output_logits, dtype=torch.float)
         gating_probs = gating_net(log_probs).detach().cpu().numpy()
-        result.append((output_tokens, gating_probs))
+        result.append((id, output_tokens, gating_probs))
         #print(f"\nINPUT: {model_input}")
         #for token, gp in zip(output_tokens, gating_probs):
             #print(f"  {token} => gating_prob={gp:.3f}")
@@ -193,7 +217,7 @@ def train_with_entropy(
         print(f"Epoch {epoch+1}/{num_epochs}")
         total_loss = 0.0
 
-        for (model_input, output_tokens, output_logits) in dataset:
+        for (id, model_input, output_tokens, output_logits) in dataset:
             log_probs = torch.tensor(output_logits, dtype=torch.float)
             gating_probs = gating_net(log_probs)
 
@@ -238,7 +262,7 @@ def train_with_entropy(
         print(f"  Avg loss: {avg_loss:.4f}")
 
     print("\nFinished training.")
-    return get_training_results(gating_net, dataset)
+    return gating_net
 
 
 def spread_gating_probs(
@@ -294,14 +318,14 @@ def spread_gating_probs(
 
 def spread_all(zipped):
     new_zipped = zipped.copy()
-    for (tokens, gating_probs) in zipped:
+    for (id, tokens, gating_probs) in zipped:
         new_zipped.append((tokens, spread_gating_probs(gating_probs)))
 
     return new_zipped
     
 def generate_spans(zipped):
     spans = []
-    for (tokens, gating_probs) in zipped:
+    for (id, tokens, gating_probs) in zipped:
         i = 0
         span = None
         for token, gating_prob in zip(tokens, gating_probs):
@@ -326,20 +350,28 @@ def generate_spans(zipped):
 
     return spans
 
+def calculate_error(gating_model, labeled_jsonl_path):
+    labeled_dataset = from_jsonl(labeled_jsonl_path)
+    zipped = get_training_results(gating_model, labeled_dataset)
+    spans = generate_spans(zipped)
+    lables = labels_from_jsonl(labeled_jsonl_path)
+    for (soft_labels, hard_labels) in lables:
 
 
 if __name__ == "__main__":
     # Example usage
     # Suppose you have 'data.jsonl' in the same folder
     #train_soft_gating(jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
-    zipped = train_with_entropy(
+    gating_model = train_with_entropy(
         jsonl_path="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl",
         embed_dim=768,
-        num_epochs=3,
+        num_epochs=1,
         lambda_penalty=1.4,
         lambda_entropy=1.5,
         learning_rate=0.001
     )
+    test_samples = from_jsonl("data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl")
+    zipped = get_training_results(gating_model, test_samples)
     zipped_spread = spread_all(zipped)
     spans = generate_spans(zipped_spread)
     print(spans)
