@@ -154,7 +154,8 @@ def train_with_entropy(
     embed_dim=8,
     num_epochs=3,
     lambda_penalty=0.01,
-    lambda_entropy=0.01
+    lambda_entropy=0.01,
+    learning_rate=0.01
 ):
     """
     Example training loop:
@@ -163,7 +164,7 @@ def train_with_entropy(
     - Optionally, you can also keep the sum(g_i) penalty if you want.
     """
     gating_net = GatingNetwork()
-    optimizer = optim.Adam(gating_net.parameters(), lr=0.01)
+    optimizer = optim.Adam(gating_net.parameters(), learning_rate)
 
     dataset = []
     with open(jsonl_path, 'r', encoding='utf-8') as f:
