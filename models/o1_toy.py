@@ -2,6 +2,7 @@
 
 import os
 import json
+import argparse
 import sentence_transformers
 import torch
 import torch.nn as nn
@@ -419,23 +420,22 @@ def calculate_error(gating_model, labeled_jsonl_path, threshold):
 
 
 
-if __name__ == "__main__":
+def main(args):
     # Example usage of soft gating
     #train_soft_gating(data="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
 
-    sources = [
-        'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
-        'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl'
-    ]
+    lang = args.test_lang
+
+    sources = args.data_path
     train_samples = []
     for s in sources:
         train_samples += from_jsonl(s)
 
     train_config = {
-        'num_epochs': 2,
-        'lambda_penalty': 1.4,
-        'lambda_entropy': 1.5,
-        'learning_rate': 0.001
+        'num_epochs': args.num_epochs,
+        'lambda_penalty': args.lambda_penalty,
+        'lambda_entropy': args.lambda_entropy,
+        'learning_rate': args.learning_rate
     }
 
     gating_model = train_with_entropy(
@@ -446,9 +446,9 @@ if __name__ == "__main__":
         train_config['learning_rate']
     )
 
-    prob_threshold = 0.3
+    prob_threshold = args.prob_threshold
 
-    test_samples = from_jsonl("data_sets/validation/mushroom.en-val.v2.jsonl")
+    test_samples = from_jsonl(args.test_path)
     zipped = get_training_results(gating_model, test_samples)
     zipped_spread = spread_all(zipped)
     span_groups = generate_span_groups(zipped_spread, prob_threshold)
@@ -456,9 +456,28 @@ if __name__ == "__main__":
     print(predictions_classic)
     print(predictions_spread)
 
-    export_path = 'test/results/o1_toy/'
-    if not os.path.exists(export_path):
-        os.makedirs(export_path)
+    output_path = args.output_path
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
-    export_to_jsonl(predictions_classic, export_path+get_unique_filename("en-pred.jsonl", train_config))
-    export_to_jsonl(predictions_spread, export_path+get_unique_filename("en-pred_spread.jsonl", train_config))
+    export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config))
+    export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config))
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="")
+    parser.add_argument('--data_path', nargs='+', type=str,
+        default=[
+            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl'
+        ],
+        help="Path to the training data")
+    parser.add_argument('--test_path', type=str, default='data_sets/validation/mushroom.en-val.v2.jsonl', help="Path to the testing data")
+    parser.add_argument('--test_lang', type=str, default='en')
+    parser.add_argument('--num_epochs', type=int, default=1)
+    parser.add_argument('--lambda_penalty', type=float, default=1.4)
+    parser.add_argument('--lambda_entropy', type=float, default=1.5)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--prob_threshold', type=float, default=0.3)
+    parser.add_argument('--output_path', type=str, default='test/results/o1_toy/', help="Path to save the predictions at")
+    args = parser.parse_args()
+    main(args)
