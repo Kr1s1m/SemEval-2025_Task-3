@@ -28,6 +28,7 @@ def embed_output_token(token):
 
 def from_jsonl(jsonl_path):
     dataset = []
+    idx = 1
     with open(jsonl_path, 'r', encoding='utf-8') as f:
         for line in f:
             data = json.loads(line.strip())
@@ -35,7 +36,6 @@ def from_jsonl(jsonl_path):
                 continue
             # Extract needed fields
             lang = data.get("lang", "")
-            idx = 0
             id = data.get("id", f"train-{lang.lower()}-{idx}")
             model_input = data.get("model_input", "")
             output_tokens = data.get("model_output_tokens", [])
@@ -50,6 +50,7 @@ def from_jsonl(jsonl_path):
 
 def labels_from_jsonl(jsonl_path):
     labels = []
+    idx = 1
     with open(jsonl_path, 'r', encoding='utf-8') as f:
         for line in f:
             data = json.loads(line.strip())
@@ -57,7 +58,6 @@ def labels_from_jsonl(jsonl_path):
                 continue
             # Extract needed fields
             lang = data.get("lang", "")
-            idx = 0
             id = data.get("id", f"train-{lang.lower()}-{idx}")
             soft_labels = data.get("soft_labels", [])
             hard_labels = data.get("hard_labels", [])
