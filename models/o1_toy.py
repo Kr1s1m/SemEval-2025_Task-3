@@ -390,26 +390,26 @@ def calculate_error(silver_labels, gold_labels):
     if len(silver_labels) == len(gold_labels):
         for silver_label, (id, soft_labels, hard_labels) in zip(silver_labels, gold_labels):
             for silver_span, gold_span in zip(silver_label['soft_labels'], soft_labels):
-                gold_len = gold_span['start']-gold_span['end']+1
+                gold_len = abs(gold_span['start']-gold_span['end'])+1
                 if silver_span['start'] == gold_span['start']:
                     if silver_span['end'] == gold_span['end']:
                         correct += 1.0
                     else:
-                        correct += 1.0 - min(1.0, abs(silver_span['end']-gold_span['end']+1)/(gold_len))
+                        correct += 1.0 - min(1.0, (abs(silver_span['end']-gold_span['end'])+1)/(gold_len))
                 elif silver_span['start'] > gold_span['start']:
                     if silver_span['start'] > gold_span['end']:
                         correct += 0.0
                     elif silver_span['end'] > gold_span['end']:
-                        correct += 1.0 - min(1.0, abs(silver_span['start']-gold_span['end']+1)/(gold_len))
+                        correct += 1.0 - min(1.0, (abs(silver_span['start']-gold_span['end'])+1)/(gold_len))
                     else: #silver_span['end'] <= gold_span['end']
-                        correct += 1.0 - min(1.0, abs(silver_span['start']-silver_span['end']+1)/(gold_len))
+                        correct += 1.0 - min(1.0, (abs(silver_span['start']-silver_span['end'])+1)/(gold_len))
                 else: #silver_span['start'] < gold_span['start']
                     if silver_span['end'] < gold_span['start']:
                         correct += 0.0
                     elif silver_span['end'] <= gold_span['end']:
-                        correct += 1.0 - min(1.0, abs(gold_span['start']-silver_span['end']+1)/(gold_len))
+                        correct += 1.0 - min(1.0, (abs(gold_span['start']-silver_span['end'])+1)/(gold_len))
                     else: #silver_span['end'] > gold_span['end']
-                        correct += 1.0 - min(1.0, abs(silver_span['start']-silver_span['end']+1)/(gold_len))
+                        correct += 1.0 - min(1.0, (abs(silver_span['start']-silver_span['end'])+1)/(gold_len))
 
         error = correct / len(gold_labels)
     return error
