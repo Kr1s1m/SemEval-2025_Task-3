@@ -26,7 +26,7 @@ def embed_output_token(token):
     return torch.from_numpy(sentence_transformer_model.encode(token))
 
 
-def from_jsonl(jsonl_path):
+def from_jsonl(jsonl_path, gold=False):
     dataset = []
     idx = 1
     with open(jsonl_path, 'r', encoding='utf-8') as f:
@@ -38,36 +38,25 @@ def from_jsonl(jsonl_path):
             lang = data.get("lang", "")
             id = data.get("id", f"train-{lang.lower()}-{idx}")
             model_input = data.get("model_input", "")
-            output_tokens = data.get("model_output_tokens", [])
-            output_logits = data.get("model_output_logits", [])
+            if not gold:
+                output_tokens = data.get("model_output_tokens", [])
+                output_logits = data.get("model_output_logits", [])
+                if not output_tokens or not output_logits:
+                    continue
+                dataset.append((id, model_input, output_tokens, output_logits))
+            else :
+                soft_labels = data.get("soft_labels", [])
+                hard_labels = data.get("hard_labels", [])
+                if not soft_labels and not hard_labels:
+                    continue
+                dataset.append((id, soft_labels, hard_labels))
+
             # Skip if invalid
-            if not output_tokens or not output_logits:
-                continue
-            dataset.append((id, model_input, output_tokens, output_logits))
+
             idx += 1
 
     return dataset
 
-def labels_from_jsonl(jsonl_path):
-    labels = []
-    idx = 1
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            data = json.loads(line.strip())
-            if not data:
-                continue
-            # Extract needed fields
-            lang = data.get("lang", "")
-            id = data.get("id", f"train-{lang.lower()}-{idx}")
-            soft_labels = data.get("soft_labels", [])
-            hard_labels = data.get("hard_labels", [])
-            # Skip if invalid
-            if not soft_labels or not hard_labels:
-                continue
-            labels.append((id, soft_labels, hard_labels))
-            idx += 1
-
-    return labels
 
 # -------------------------------------------------------------
 # 2. GATING NETWORK (maps log prob -> gating probability [0..1])
@@ -324,7 +313,7 @@ def generate_span_groups(zipped, threshold):
         span_group = {'id': id, 'spans': []}
         for token, gating_prob in zip(tokens, gating_probs):
             if gating_prob >= threshold:
-                if span == None:                  
+                if span is None:
                     span = {
                         'start': i,
                         'end': i,
@@ -362,7 +351,7 @@ def generate_predictions(span_groups):
                 'prob': float(span['prob'])
             }
             prediction['soft_labels'].append(soft_label)
-            if(span['prob'] >= 0.5):
+            if span['prob'] >= 0.5:
                 hard_label = [soft_label['start'], soft_label['end']]
                 prediction['hard_labels'].append(hard_label)
         predictions.append(prediction)
@@ -386,11 +375,11 @@ def calculate_error_pair(gating_model, labeled_jsonl_path, threshold):
     #generate span groups
     labeled_dataset = from_jsonl(labeled_jsonl_path)
     zipped = get_training_results(gating_model, labeled_dataset)
-    span_groups = generate_span_groups(zipped, threshold)
-
+    zipped_spread = spread_all(zipped)
+    span_groups = generate_span_groups(zipped_spread, threshold)
     #extract into silver and gold label lists
     silver_labels_classic, silver_labels_spread = generate_predictions(span_groups)
-    gold_labels = labels_from_jsonl(labeled_jsonl_path)
+    gold_labels = from_jsonl(labeled_jsonl_path, True)
 
     return calculate_error(silver_labels_classic, gold_labels), calculate_error(silver_labels_spread, gold_labels)
 
@@ -464,7 +453,7 @@ def main(args):
     print(predictions_spread)
 
     error_classic, error_spread = calculate_error_pair(gating_model, args.test_path, prob_threshold)
-    print("Error classic: "+error_classic+" Error spread: "+error_spread)
+    print(f"Error classic:  {error_classic} \n Error spread:  {error_spread}")
 
     output_path = args.output_path
     if not os.path.exists(output_path):
