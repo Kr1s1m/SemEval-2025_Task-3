@@ -170,9 +170,9 @@ def get_training_results(gating_net, dataset):
         log_probs = torch.tensor(output_logits, dtype=torch.float)
         gating_probs = gating_net(log_probs).detach().cpu().numpy()
         result.append((id, output_tokens, gating_probs))
-        #print(f"\nINPUT: {model_input}")
-        #for token, gp in zip(output_tokens, gating_probs):
-            #print(f"  {token} => gating_prob={gp:.3f}")
+        print(f"\nINPUT: {model_input}")
+        for token, gp in zip(output_tokens, gating_probs):
+            print(f"  {token} => gating_prob={gp:.3f}")
 
     print("\nGating probabilities generated.")
     return result
@@ -300,6 +300,8 @@ def spread_gating_probs(
     # Optionally, you might want to clip values above 1.0
     new_probs = np.clip(new_probs, 0.0, 1.0)
 
+    #new_probs[0] *= 0.01
+
     return new_probs
 
 def split_list(a_list):
@@ -338,7 +340,7 @@ def generate_span_groups(zipped, threshold):
                     span['prob'] /= (span['end'] - span['start']) + 1
                     span_group['spans'].append(span)
                     span = None
-            i+=1
+            i+=len(token)
         span_groups.append(span_group)
 
     return span_groups
@@ -380,17 +382,22 @@ def export_to_jsonl(predictions, jsonl_path):
             json_line = json.dumps(prediction)
             f.write(json_line + '\n')
                 
-
-def calculate_error(gating_model, labeled_jsonl_path, threshold):
-    error = -1.0
-    correct = 0.0
-    #generate gating probs
+def calculate_error_pair(gating_model, labeled_jsonl_path, threshold):
+    #generate span groups
     labeled_dataset = from_jsonl(labeled_jsonl_path)
     zipped = get_training_results(gating_model, labeled_dataset)
     span_groups = generate_span_groups(zipped, threshold)
 
-    silver_labels = generate_predictions(span_groups)
+    #extract into silver and gold label lists
+    silver_labels_classic, silver_labels_spread = generate_predictions(span_groups)
     gold_labels = labels_from_jsonl(labeled_jsonl_path)
+
+    return calculate_error(silver_labels_classic, gold_labels), calculate_error(silver_labels_spread, gold_labels)
+
+def calculate_error(silver_labels, gold_labels):
+    error = -1.0
+    correct = 0.0
+
     if len(silver_labels) == len(gold_labels):
         for silver_label, (id, soft_labels, hard_labels) in zip(silver_labels, gold_labels):
             for silver_span, gold_span in zip(silver_label['soft_labels'], soft_labels):
@@ -456,6 +463,9 @@ def main(args):
     print(predictions_classic)
     print(predictions_spread)
 
+    error_classic, error_spread = calculate_error_pair(gating_model, args.test_path, prob_threshold)
+    print("Error classic: "+error_classic+" Error spread: "+error_spread)
+
     output_path = args.output_path
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -474,10 +484,10 @@ if __name__ == "__main__":
     parser.add_argument('--test_path', type=str, default='data_sets/validation/mushroom.en-val.v2.jsonl', help="Path to the testing data")
     parser.add_argument('--test_lang', type=str, default='en')
     parser.add_argument('--num_epochs', type=int, default=1)
-    parser.add_argument('--lambda_penalty', type=float, default=1.4)
-    parser.add_argument('--lambda_entropy', type=float, default=1.5)
+    parser.add_argument('--lambda_penalty', type=float, default=1.2)
+    parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
-    parser.add_argument('--prob_threshold', type=float, default=0.3)
+    parser.add_argument('--prob_threshold', type=float, default=0.6)
     parser.add_argument('--output_path', type=str, default='test/results/o1_toy/', help="Path to save the predictions at")
     args = parser.parse_args()
     main(args)
