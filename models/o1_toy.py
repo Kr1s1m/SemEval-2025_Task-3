@@ -76,70 +76,6 @@ class GatingNetwork(nn.Module):
         """
         return torch.sigmoid(self.w * log_probs + self.b)
 
-
-# -------------------------------
-# 3. MAIN TRAINING LOOP (TOY)
-# -------------------------------
-#def train_soft_gating(data, embed_dim=8, num_epochs=1):
-#    """
-#    Reads data from data, trains a gating network for soft masking.
-#    Minimizes the L2 distance between the 'masked output embedding' and
-#    the 'input text embedding' as a toy 'consistency loss'.
-#    """
-#    gating_net = GatingNetwork()
-#    optimizer = optim.Adam(gating_net.parameters(), lr=0.01)
-#
-#    # We'll store the dataset in memory for simplicity
-#    dataset = from_jsonl(data)
-#
-#   for epoch in range(num_epochs):
-#        print(f"Epoch {epoch + 1}/{num_epochs}")
-#        total_loss = 0.0
-#        for (model_input, output_tokens, output_logits) in dataset:
-#            # Convert logits to torch tensor
-#            log_probs = torch.tensor(output_logits, dtype=torch.float)
-#
-#            # Get gating probabilities
-#            gating_probs = gating_net(log_probs)  # shape: (num_tokens,)
-#
-#            # 1) Embed input text (dim=embed_dim)
-#            input_embed = embed_input_text(model_input, embed_dim=embed_dim)
-#
-#            # 2) Embed each token and apply "soft mask"
-#            #    (1 - gating_prob) means keep the token if gating_prob is small.
-#            masked_output_embed = torch.zeros(embed_dim)
-#            for i, token in enumerate(output_tokens):
-#                token_embed = embed_output_token(token, embed_dim=embed_dim)
-#                keep_weight = (1 - gating_probs[i])
-#                masked_output_embed += keep_weight * token_embed
-#
-#            # 3) Consistency loss: L2 distance between
-#            #    masked_output_embed and input_embed
-#            loss = torch.mean((masked_output_embed - input_embed) ** 2)
-#
-#            optimizer.zero_grad()
-#            loss.backward()
-#            optimizer.step()
-#
-#            total_loss += loss.item()
-#
-#        print(f"  Avg loss this epoch: {total_loss / len(dataset):.4f}")
-#
-#    # After training, let's see the gating probabilities we learned
-#    print("\nTraining complete.\nNow printing gating for each example:")
-#    gating_net.eval()
-#    for (model_input, output_tokens, output_logits) in dataset:
-#        log_probs = torch.tensor(output_logits, dtype=torch.float)
-#        gating_probs = gating_net(log_probs)  # shape: (num_tokens,)
-#
-#        # Detach from computation graph and convert to NumPy
-#        gating_probs_np = gating_probs.detach().cpu().numpy()
-#
-#        print(f"\nINPUT: {model_input}")
-#        print("TOKENS and gating probabilities (near 1 => masked out):")
-#        for token, gp in zip(output_tokens, gating_probs_np):
-#            print(f"  {token} => gating_prob={gp:.3f}")
-
 def embed_to_distribution(embedding):
     eps = 1e-8
     exp_emb = torch.exp(embedding)
@@ -151,7 +87,6 @@ def binary_entropy(g):
     eps = 1e-8
     return - (g * torch.log(g + eps) + (1 - g) * torch.log(1 - g + eps))
 
-
 def get_training_results(gating_net, dataset):
     result = []
     gating_net.eval()
@@ -159,9 +94,9 @@ def get_training_results(gating_net, dataset):
         log_probs = torch.tensor(output_logits, dtype=torch.float)
         gating_probs = gating_net(log_probs).detach().cpu().numpy()
         result.append((id, output_tokens, gating_probs))
-        print(f"\nINPUT: {model_input}")
-        for token, gp in zip(output_tokens, gating_probs):
-            print(f"  {token} => gating_prob={gp:.3f}")
+        #print(f"\nINPUT: {model_input}")
+        #for token, gp in zip(output_tokens, gating_probs):
+            #print(f"  {token} => gating_prob={gp:.3f}")
 
     print("\nGating probabilities generated.")
     return result
@@ -297,10 +232,10 @@ def split_list(a_list):
     half = len(a_list)//2
     return a_list[:half], a_list[half:]
 
-def spread_all(zipped):
+def spread_all(zipped, threshold=0.8, spread_factor=0.1):
     new_zipped = zipped.copy()
     for (id, tokens, gating_probs) in zipped:
-        new_zipped.append((id, tokens, spread_gating_probs(gating_probs)))
+        new_zipped.append((id, tokens, spread_gating_probs(gating_probs, threshold, spread_factor)))
 
     #returns a list which contains first the original zipped and then with spread probs
     return new_zipped
@@ -371,17 +306,11 @@ def export_to_jsonl(predictions, jsonl_path):
             json_line = json.dumps(prediction)
             f.write(json_line + '\n')
                 
-def calculate_error_pair(gating_model, labeled_jsonl_path, threshold):
-    #generate span groups
-    labeled_dataset = from_jsonl(labeled_jsonl_path)
-    zipped = get_training_results(gating_model, labeled_dataset)
-    zipped_spread = spread_all(zipped)
-    span_groups = generate_span_groups(zipped_spread, threshold)
-    #extract into silver and gold label lists
-    silver_labels_classic, silver_labels_spread = generate_predictions(span_groups)
-    gold_labels = from_jsonl(labeled_jsonl_path, True)
+def calculate_error_pair(silver_labels_classic, silver_labels_spread, gold_labels):
+    error_classic = calculate_error(silver_labels_classic, gold_labels)
+    error_spread = calculate_error(silver_labels_spread, gold_labels)
 
-    return calculate_error(silver_labels_classic, gold_labels), calculate_error(silver_labels_spread, gold_labels)
+    return error_classic, error_spread
 
 def calculate_error(silver_labels, gold_labels):
     error = -1.0
@@ -444,15 +373,20 @@ def main(args):
 
     prob_threshold = args.prob_threshold
 
+    spread_threshold = args.spread_threshold
+    spread_factor = args.spread_factor
+
     test_samples = from_jsonl(args.test_path)
     zipped = get_training_results(gating_model, test_samples)
-    zipped_spread = spread_all(zipped)
+    zipped_spread = spread_all(zipped, spread_threshold, spread_factor)
     span_groups = generate_span_groups(zipped_spread, prob_threshold)
     predictions_classic, predictions_spread = generate_predictions(span_groups)
-    print(predictions_classic)
-    print(predictions_spread)
+    #print(predictions_classic)
+    #print(predictions_spread)
 
-    error_classic, error_spread = calculate_error_pair(gating_model, args.test_path, prob_threshold)
+    gold_labels = from_jsonl(args.test_path, gold=True)
+
+    error_classic, error_spread = calculate_error_pair(predictions_classic, predictions_spread, gold_labels)
     print(f"Error classic:  {error_classic} \n Error spread:  {error_spread}")
 
     output_path = args.output_path
@@ -461,6 +395,8 @@ def main(args):
 
     export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config))
     export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config))
+
+    return error_classic, error_spread
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="")
@@ -477,6 +413,8 @@ if __name__ == "__main__":
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--prob_threshold', type=float, default=0.6)
+    parser.add_argument('--spread_threshold', type=float, default=0.8)
+    parser.add_argument('--spread_factor', type=float, default=0.1)
     parser.add_argument('--output_path', type=str, default='test/results/o1_toy/', help="Path to save the predictions at")
     args = parser.parse_args()
     main(args)
