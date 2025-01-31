@@ -294,10 +294,10 @@ def generate_predictions(span_groups):
     #returns predictions_classic, predictions_spread tuple of lists - check spread_all and split_list
     return split_list(predictions)
 
-def get_unique_filename(filename, t_cfg):
+def get_unique_filename(filename, t_cfg, prob_thresh):
     base, ext = os.path.splitext(filename)
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    new_filename = f"{base}-ne_{t_cfg['num_epochs']}_lp_{t_cfg['lambda_penalty']}_le_{t_cfg['lambda_entropy']}_lr_{t_cfg['learning_rate']}-{current_time}{ext}"
+    new_filename = f"{base}-ne_{t_cfg['num_epochs']}_lp_{t_cfg['lambda_penalty']}_le_{t_cfg['lambda_entropy']}_lr_{t_cfg['learning_rate']}_pt_{prob_thresh}-{current_time}{ext}"
     return new_filename
 
 def export_to_jsonl(predictions, jsonl_path):
@@ -393,8 +393,8 @@ def main(args):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config))
-    export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config))
+    export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config, prob_threshold))
+    export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config, prob_threshold))
 
     return error_classic, error_spread
 
@@ -403,12 +403,28 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', nargs='+', type=str,
         default=[
             'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl'
+            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
+            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
+            'data_sets/train_unlabeled/mushroom.zh-train_nolabel.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.ar-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.ca-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.cs-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.de-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.es-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.eu-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.fa-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.fi-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.hi-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.it-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.sv-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.zh-tst.v1.jsonl'
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', type=str, default='data_sets/validation/mushroom.en-val.v2.jsonl', help="Path to the testing data")
     parser.add_argument('--test_lang', type=str, default='en')
-    parser.add_argument('--num_epochs', type=int, default=1)
+    parser.add_argument('--num_epochs', type=int, default=2)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
