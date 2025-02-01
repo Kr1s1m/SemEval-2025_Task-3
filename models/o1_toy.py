@@ -423,7 +423,7 @@ if __name__ == "__main__":
             'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl'
         ],
         help="Path to the training data")
-    parser.add_argument('----test_path', nargs='+', type=str,
+    parser.add_argument('--test_path', nargs='+', type=str,
         default=[
             'data_sets/validation/mushroom.ar-val.v2.jsonl',
             'data_sets/validation/mushroom.de-val.v2.jsonl',
@@ -437,7 +437,7 @@ if __name__ == "__main__":
             'data_sets/validation/mushroom.zh-val.v2.jsonl'
         ],
         help="Path to the testing data")
-    parser.add_argument('----test_lang', nargs='+', type=str,
+    parser.add_argument('--test_lang', nargs='+', type=str,
         default=['ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
     parser.add_argument('--num_epochs', type=int, default=1)
