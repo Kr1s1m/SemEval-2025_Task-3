@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import re
 import json
 import argparse
-import sentence_transformers
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -43,11 +43,19 @@ def from_jsonl(jsonl_path, gold=False):
                 output_logits = data.get("model_output_logits", [])
                 if not output_tokens or not output_logits:
                     continue
+                if lang=="FI" or lang=="DE" or lang=="IT" or lang=="SV":
+                    regex = re.compile(r'\<.*\>$')
+                    filtered = [(t, l) for (t, l) in zip(output_tokens, output_logits) if not regex.match(t)]
+                    output_tokens = [t for (t, _) in filtered]
+                    output_logits = [l for (_, l) in filtered]
+                if lang=="AR":
+                    output_tokens = [t[:len(t)//2] for t in output_tokens]
+
                 dataset.append((id, model_input, output_tokens, output_logits))
-            else :
-                soft_labels = data.get("soft_labels", [])
-                hard_labels = data.get("hard_labels", [])
-                if not soft_labels and not hard_labels:
+            else:
+                soft_labels = data.get("soft_labels", "?")
+                hard_labels = data.get("hard_labels", "?")
+                if soft_labels == "?" or hard_labels == "?":
                     continue
                 dataset.append((id, soft_labels, hard_labels))
 
@@ -340,16 +348,12 @@ def calculate_error(silver_labels, gold_labels):
                     else: #silver_span['end'] > gold_span['end']
                         correct += 1.0 - min(1.0, (abs(silver_span['start']-silver_span['end'])+1)/(gold_len))
 
-        error = correct / len(gold_labels)
+        error = 1.0 - correct / len(gold_labels)
     return error
 
 
 
 def main(args):
-    # Example usage of soft gating
-    #train_soft_gating(data="data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl", embed_dim=768, num_epochs=3)
-
-    lang = args.test_lang
 
     sources = args.data_path
     train_samples = []
@@ -376,27 +380,35 @@ def main(args):
     spread_threshold = args.spread_threshold
     spread_factor = args.spread_factor
 
-    test_samples = from_jsonl(args.test_path)
-    zipped = get_training_results(gating_model, test_samples)
-    zipped_spread = spread_all(zipped, spread_threshold, spread_factor)
-    span_groups = generate_span_groups(zipped_spread, prob_threshold)
-    predictions_classic, predictions_spread = generate_predictions(span_groups)
-    #print(predictions_classic)
-    #print(predictions_spread)
+    errors_classic = {}
+    errors_spread = {}
 
-    gold_labels = from_jsonl(args.test_path, gold=True)
+    for path, lang in zip(args.test_path, args.test_lang):
 
-    error_classic, error_spread = calculate_error_pair(predictions_classic, predictions_spread, gold_labels)
-    print(f"Error classic:  {error_classic} \n Error spread:  {error_spread}")
+        test_samples = from_jsonl(path)
+        zipped = get_training_results(gating_model, test_samples)
+        zipped_spread = spread_all(zipped, spread_threshold, spread_factor)
+        span_groups = generate_span_groups(zipped_spread, prob_threshold)
+        predictions_classic, predictions_spread = generate_predictions(span_groups)
+        #print(predictions_classic)
+        #print(predictions_spread)
 
-    output_path = args.output_path
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
+        gold_labels = from_jsonl(path, gold=True)
 
-    export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config, prob_threshold))
-    export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config, prob_threshold))
+        error_classic, error_spread = calculate_error_pair(predictions_classic, predictions_spread, gold_labels)
+        errors_classic[lang] = error_classic
+        errors_spread[lang] = error_spread
 
-    return error_classic, error_spread
+        output_path = args.output_path
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config, prob_threshold))
+        export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config, prob_threshold))
+
+    print(f"Errors classic: {errors_classic}")
+    print(f"Errors spread:  {errors_spread}")
+    return errors_classic, errors_spread
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="")
@@ -405,26 +417,30 @@ if __name__ == "__main__":
             'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
             'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
             'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.zh-train_nolabel.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.ar-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.ca-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.cs-tst.v1.jsonl',
             'data_sets/test_unlabeled/mushroom.de-tst.v1.jsonl',
             'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl',
             'data_sets/test_unlabeled/mushroom.es-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.eu-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fa-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fi-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.hi-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.it-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.sv-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.zh-tst.v1.jsonl'
+            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl'
         ],
         help="Path to the training data")
-    parser.add_argument('--test_path', type=str, default='data_sets/validation/mushroom.en-val.v2.jsonl', help="Path to the testing data")
-    parser.add_argument('--test_lang', type=str, default='en')
-    parser.add_argument('--num_epochs', type=int, default=2)
+    parser.add_argument('----test_path', nargs='+', type=str,
+        default=[
+            'data_sets/validation/mushroom.ar-val.v2.jsonl',
+            'data_sets/validation/mushroom.de-val.v2.jsonl',
+            'data_sets/validation/mushroom.en-val.v2.jsonl',
+            'data_sets/validation/mushroom.es-val.v2.jsonl',
+            'data_sets/validation/mushroom.fi-val.v2.jsonl',
+            'data_sets/validation/mushroom.fr-val.v2.jsonl',
+            'data_sets/validation/mushroom.hi-val.v2.jsonl',
+            'data_sets/validation/mushroom.it-val.v2.jsonl',
+            'data_sets/validation/mushroom.sv-val.v2.jsonl',
+            'data_sets/validation/mushroom.zh-val.v2.jsonl'
+        ],
+        help="Path to the testing data")
+    parser.add_argument('----test_lang', nargs='+', type=str,
+        default=['ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
+        help="List of test languages")
+    parser.add_argument('--num_epochs', type=int, default=1)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)

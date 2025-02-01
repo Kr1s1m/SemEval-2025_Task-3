@@ -7,3 +7,4 @@ ipywidgets
 transformers[torch]
 seqeval
 sentence_transformers
+re
