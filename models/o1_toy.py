@@ -403,8 +403,10 @@ def main(args):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred.jsonl", train_config, prob_threshold))
-        export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred_spread.jsonl", train_config, prob_threshold))
+        infix = path.split('-')[1][:3]
+
+        export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred-{infix}.jsonl", train_config, prob_threshold))
+        export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred-{infix}_spread.jsonl", train_config, prob_threshold))
 
     print(f"Errors classic: {errors_classic}")
     print(f"Errors spread:  {errors_spread}")
@@ -414,17 +416,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="")
     parser.add_argument('--data_path', nargs='+', type=str,
         default=[
-            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.de-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.es-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl'
+            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl'
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', nargs='+', type=str,
         default=[
+            
+            'data_sets/test_unlabeled/mushroom.ar-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.de-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.es-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.fi-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.hi-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.it-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.sv-tst.v1.jsonl',
+            'data_sets/test_unlabeled/mushroom.zh-tst.v1.jsonl',
             'data_sets/validation/mushroom.ar-val.v2.jsonl',
             'data_sets/validation/mushroom.de-val.v2.jsonl',
             'data_sets/validation/mushroom.en-val.v2.jsonl',
@@ -438,7 +445,7 @@ if __name__ == "__main__":
         ],
         help="Path to the testing data")
     parser.add_argument('--test_lang', nargs='+', type=str,
-        default=['ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
+        default=['ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
     parser.add_argument('--num_epochs', type=int, default=1)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
