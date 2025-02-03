@@ -1,7 +1,7 @@
 # SemEval-2025_Task-3
  [Mu-SHROOM, the Multilingual Shared-task on Hallucinations and Related Observable Overgeneration Mistakes](https://helsinki-nlp.github.io/shroom/)
 
-## Baseline model reference scores:
+## Baseline model reference scores (validation dataset):
 |     | ar   |  de | en  | es  |fi   | fr  | it  | hi  | sv  |  zh |
 | --- | ---- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 |IoU:| 0.00011060 | 0.27163893  | 0.08018648  | 0.07150483  | 0.08427371 |  0.11302211 |  0.00097039 |  0.24205735 |  0.18927982 |  0.07758474 |
