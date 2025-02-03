@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 import json
 import argparse
 import torch
@@ -9,6 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from datetime import datetime
+import subprocess
 from sentence_transformers import SentenceTransformer
 
 
@@ -41,15 +43,21 @@ def from_jsonl(jsonl_path, gold=False):
             if not gold:
                 output_tokens = data.get("model_output_tokens", [])
                 output_logits = data.get("model_output_logits", [])
+
+                if lang=="CA" and id.split("-")[:2]==["tst", "ca"]:
+                    output_tokens = "".join(list(filter(lambda t: t!='[' and t!=']' and t!="'", output_tokens))).split(", ")
+                    output_logits = list(map(float, "".join(list(filter(lambda l: l!='[' and l!=']' and l!="'", output_logits))).split(", ")))
+                    
                 if not output_tokens or not output_logits:
                     continue
-                if lang=="FI" or lang=="DE" or lang=="IT" or lang=="SV":
-                    regex = re.compile(r'\<.*\>$')
-                    filtered = [(t, l) for (t, l) in zip(output_tokens, output_logits) if not regex.match(t)]
-                    output_tokens = [t for (t, _) in filtered]
-                    output_logits = [l for (_, l) in filtered]
+                
+                regex = re.compile(r'\<.*\>$')
+                filtered = [(t, l) for (t, l) in zip(output_tokens, output_logits) if not regex.match(t)]
+                output_tokens = [t for (t, _) in filtered]
+                output_logits = [l for (_, l) in filtered]
+
                 if lang=="AR":
-                    output_tokens = [t[:len(t)//2] for t in output_tokens]
+                    output_tokens = [t[:max(1, len(t)//2)] for t in output_tokens]
 
                 dataset.append((id, model_input, output_tokens, output_logits))
             else:
@@ -252,6 +260,7 @@ def generate_span_groups(zipped, threshold):
     span_groups = []
     for (id, tokens, gating_probs) in zipped:
         i = 0
+        t = 0
         span = None
         span_group = {'id': id, 'spans': []}
         for token, gating_prob in zip(tokens, gating_probs):
@@ -259,7 +268,7 @@ def generate_span_groups(zipped, threshold):
                 if span is None:
                     span = {
                         'start': i,
-                        'end': i,
+                        'end': i+len(token),
                         'prob': gating_prob,
                         'tokens': [token]
                     }
@@ -267,12 +276,14 @@ def generate_span_groups(zipped, threshold):
                     span['end'] = i
                     span['prob'] += gating_prob
                     span['tokens'].append(token)
+                t += 1
             else:
                 if span is not None:
-                    span['prob'] /= (span['end'] - span['start']) + 1
+                    span['prob'] /= (t + 1)
                     span_group['spans'].append(span)
                     span = None
-            i+=len(token)
+                t = 0
+            i += len(token)
         span_groups.append(span_group)
 
     return span_groups
@@ -313,6 +324,12 @@ def export_to_jsonl(predictions, jsonl_path):
         for prediction in predictions:
             json_line = json.dumps(prediction)
             f.write(json_line + '\n')
+
+def format_checker(ref_dir, pred_file):
+    subprocess.run([sys.executable, "participant_kit/format_checker.py", ref_dir, pred_file], shell=True)
+
+def scorer(ref_file, pred_file, output_file):
+    subprocess.run([sys.executable, "participant_kit/scorer.py", ref_file, pred_file, output_file], shell=True)
                 
 def calculate_error_pair(silver_labels_classic, silver_labels_spread, gold_labels):
     error_classic = calculate_error(silver_labels_classic, gold_labels)
@@ -380,33 +397,92 @@ def main(args):
     spread_threshold = args.spread_threshold
     spread_factor = args.spread_factor
 
+    output_path = args.output_path
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = f"run-@{current_time}"
+    output_path += "/" + run_dir
+    os.makedirs(output_path)
+
+    score_path = 'scores/o1_toy/'+run_dir
+    if not os.path.exists(score_path):
+        os.makedirs(score_path)
+
+    score_path_classic = score_path + "/classic"
+    if not os.path.exists(score_path_classic):
+        os.makedirs(score_path_classic)
+
+    score_path_spread = score_path + "/spread"
+    if not os.path.exists(score_path_spread):
+        os.makedirs(score_path_spread)
+
+    output_path_classic = output_path + "/classic"
+    if not os.path.exists(output_path_classic):
+        os.makedirs(output_path_classic)
+
+    output_path_spread = output_path + "/spread"
+    if not os.path.exists(output_path_spread):
+        os.makedirs(output_path_spread)
+
     errors_classic = {}
     errors_spread = {}
 
+    last_infix = ""
+
     for path, lang in zip(args.test_path, args.test_lang):
+
+        infix = path.split('-')[1][:3]
 
         test_samples = from_jsonl(path)
         zipped = get_training_results(gating_model, test_samples)
         zipped_spread = spread_all(zipped, spread_threshold, spread_factor)
         span_groups = generate_span_groups(zipped_spread, prob_threshold)
         predictions_classic, predictions_spread = generate_predictions(span_groups)
-        #print(predictions_classic)
-        #print(predictions_spread)
 
         gold_labels = from_jsonl(path, gold=True)
 
         error_classic, error_spread = calculate_error_pair(predictions_classic, predictions_spread, gold_labels)
-        errors_classic[lang] = error_classic
-        errors_spread[lang] = error_spread
+        errors_classic[infix+"-"+lang] = error_classic
+        errors_spread[infix+"-"+lang] = error_spread
 
-        output_path = args.output_path
-        if not os.path.exists(output_path):
-            os.makedirs(output_path)
+        infix_path_classic = output_path_classic+f"/{infix}/"
+        infix_path_spread = output_path_spread+f"/{infix}/"
 
-        infix = path.split('-')[1][:3]
+        infix_score_path_classic = score_path_classic+f"/{infix}/"
+        infix_score_path_spread = score_path_spread+f"/{infix}/"
 
-        export_to_jsonl(predictions_classic, output_path+get_unique_filename(f"{lang}-pred-{infix}.jsonl", train_config, prob_threshold))
-        export_to_jsonl(predictions_spread, output_path+get_unique_filename(f"{lang}-pred-{infix}_spread.jsonl", train_config, prob_threshold))
+        if infix != last_infix:
+            if not os.path.exists(infix_path_classic):
+                os.makedirs(infix_path_classic)
+            if not os.path.exists(infix_path_spread):
+                os.makedirs(infix_path_spread)
+            if not os.path.exists(infix_score_path_classic):
+                os.makedirs(infix_score_path_classic)
+            if not os.path.exists(infix_score_path_spread):
+                os.makedirs(infix_score_path_spread)
+        last_infix = infix
+
+        unique_filename_classic = get_unique_filename(f"{lang}-pred-{infix}.jsonl", train_config, prob_threshold)
+        unique_filename_spread = get_unique_filename(f"{lang}-pred-{infix}_spread.jsonl", train_config, prob_threshold)
+
+        infix_path_classic += unique_filename_classic
+        infix_path_spread += unique_filename_spread
+
+        export_to_jsonl(predictions_classic, infix_path_classic)
+        export_to_jsonl(predictions_spread, infix_path_spread)
+
+        ref_dir = path.split("mushroom")[0]
+
+        print(f"Checking format: {unique_filename_classic}...{format_checker(ref_dir, infix_path_classic)}")
+        print(f"Checking format: {unique_filename_spread}...{format_checker(ref_dir, infix_path_spread)}")
+
+        score_classic = infix_score_path_classic+unique_filename_classic+"_score.txt"
+        score_spread = infix_score_path_spread+unique_filename_spread+"_score.txt"
+
+        print(f"Scoring: {unique_filename_classic}...{scorer(path, infix_path_classic, score_classic)}")
+        print(f"Scoring: {unique_filename_spread}...{scorer(path, infix_path_spread, score_spread)}")
 
     print(f"Errors classic: {errors_classic}")
     print(f"Errors spread:  {errors_spread}")
@@ -416,22 +492,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="")
     parser.add_argument('--data_path', nargs='+', type=str,
         default=[
-            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl'
+            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
+            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl' 
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', nargs='+', type=str,
         default=[
             
-            'data_sets/test_unlabeled/mushroom.ar-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.de-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.en-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.es-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fi-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.fr-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.hi-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.it-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.sv-tst.v1.jsonl',
-            'data_sets/test_unlabeled/mushroom.zh-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.ar-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.ca-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.cs-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.de-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.en-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.es-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.eu-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fa-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fi-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fr-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.hi-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.it-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.sv-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.zh-tst.v1.jsonl',
             'data_sets/validation/mushroom.ar-val.v2.jsonl',
             'data_sets/validation/mushroom.de-val.v2.jsonl',
             'data_sets/validation/mushroom.en-val.v2.jsonl',
@@ -445,7 +526,7 @@ if __name__ == "__main__":
         ],
         help="Path to the testing data")
     parser.add_argument('--test_lang', nargs='+', type=str,
-        default=['ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
+        default=['ar', 'ca', 'cs', 'de', 'en', 'es', 'eu', 'fa', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
     parser.add_argument('--num_epochs', type=int, default=1)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
