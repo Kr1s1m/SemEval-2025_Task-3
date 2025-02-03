@@ -2,7 +2,7 @@ import pathlib
 import argparse
 
 import pandas as pd
-from .scorer import recompute_hard_labels, infer_soft_labels
+from scorer import recompute_hard_labels, infer_soft_labels
 
 def try_load(filename, is_ref=False):
     # adapted version to remove the dependency on labels
