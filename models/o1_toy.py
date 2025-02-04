@@ -326,10 +326,10 @@ def export_to_jsonl(predictions, jsonl_path):
             f.write(json_line + '\n')
 
 def format_checker(ref_dir, pred_file):
-    subprocess.run([sys.executable, "participant_kit/format_checker.py", ref_dir, pred_file], shell=True)
+    subprocess.run([sys.executable, "participant_kit/format_checker.py", ref_dir, pred_file])
 
 def scorer(ref_file, pred_file, output_file):
-    subprocess.run([sys.executable, "participant_kit/scorer.py", ref_file, pred_file, output_file], shell=True)
+    subprocess.run([sys.executable, "participant_kit/scorer.py", ref_file, pred_file, output_file])
                 
 def calculate_error_pair(silver_labels_classic, silver_labels_spread, gold_labels):
     error_classic = calculate_error(silver_labels_classic, gold_labels)
@@ -529,7 +529,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_lang', nargs='+', type=str,
         default=['ar', 'ca', 'cs', 'de', 'en', 'es', 'eu', 'fa', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
-    parser.add_argument('--num_epochs', type=int, default=2)
+    parser.add_argument('--num_epochs', type=int, default=1)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
