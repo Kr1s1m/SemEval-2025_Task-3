@@ -493,7 +493,8 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', nargs='+', type=str,
         default=[
             'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl' 
+            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
+            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl'
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', nargs='+', type=str,
@@ -528,7 +529,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_lang', nargs='+', type=str,
         default=['ar', 'ca', 'cs', 'de', 'en', 'es', 'eu', 'fa', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
-    parser.add_argument('--num_epochs', type=int, default=1)
+    parser.add_argument('--num_epochs', type=int, default=2)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
