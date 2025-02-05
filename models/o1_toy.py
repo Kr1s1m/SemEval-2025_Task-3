@@ -124,10 +124,10 @@ def binary_entropy(g):
 def get_training_results(gating_net, dataset):
     result = []
     gating_net.eval()
-    for (id, model_input, output_tokens, output_logits) in dataset:
+    for (id, model_input, output_text, offset_mapping, output_tokens, output_logits) in dataset:
         log_probs = torch.tensor(output_logits, dtype=torch.float)
         gating_probs = gating_net(log_probs).detach().cpu().numpy()
-        result.append((id, output_tokens, gating_probs))
+        result.append((id, output_tokens, output_text, offset_mapping, gating_probs))
         #print(f"\nINPUT: {model_input}")
         #for token, gp in zip(output_tokens, gating_probs):
             #print(f"  {token} => gating_prob={gp:.3f}")
@@ -268,15 +268,15 @@ def split_list(a_list):
 
 def spread_all(zipped, threshold=0.8, spread_factor=0.1):
     new_zipped = zipped.copy()
-    for (id, tokens, gating_probs) in zipped:
-        new_zipped.append((id, tokens, spread_gating_probs(gating_probs, threshold, spread_factor)))
+    for (id, output_text, offset_mapping, tokens, gating_probs) in zipped:
+        new_zipped.append((id, tokens, output_text, offset_mapping, spread_gating_probs(gating_probs, threshold, spread_factor)))
 
     #returns a list which contains first the original zipped and then with spread probs
     return new_zipped
     
 def generate_span_groups(zipped, threshold):
     span_groups = []
-    for (id, tokens, gating_probs) in zipped:
+    for (id, output_text, offset_mapping, tokens, gating_probs) in zipped:
         i = 0
         t = 0
         span = None
