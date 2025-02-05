@@ -11,6 +11,7 @@ import torch.optim as optim
 import numpy as np
 from datetime import datetime
 import subprocess
+from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer
 
 
@@ -41,33 +42,50 @@ def from_jsonl(jsonl_path, gold=False):
             id = data.get("id", f"train-{lang.lower()}-{idx}")
             model_input = data.get("model_input", "")
             if not gold:
+                model_id = data.get("model_id", "")
                 output_tokens = data.get("model_output_tokens", [])
                 output_logits = data.get("model_output_logits", [])
+                output_text = data.get("model_output_text", "")
 
+                # Do some functional style black magic to fix CA data points (CA dataset was messy)
                 if lang=="CA" and id.split("-")[:2]==["tst", "ca"]:
                     output_tokens = "".join(list(filter(lambda t: t!='[' and t!=']' and t!="'", output_tokens))).split(", ")
                     output_logits = list(map(float, "".join(list(filter(lambda l: l!='[' and l!=']' and l!="'", output_logits))).split(", ")))
-                    
-                if not output_tokens or not output_logits:
+                
+                # Skip if invalid
+                if not model_id or not output_tokens or not output_logits or not output_text:
                     continue
                 
+                # Filter technical tokens and their corresponding logits
                 regex = re.compile(r'\<.*\>$')
                 filtered = [(t, l) for (t, l) in zip(output_tokens, output_logits) if not regex.match(t)]
                 output_tokens = [t for (t, _) in filtered]
                 output_logits = [l for (_, l) in filtered]
 
+                # Generate offset mapping for the specific model in the data point
+                if model_id=="TheBloke/Mistral-7B-Instruct-v0.2-GGUF":
+                    model_id="mistralai/Mistral-7B-Instruct-v0.2"
+
+                tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+                tokenized_output = tokenizer(output_text, return_offsets_mapping=True)
+                offset_mapping = tokenized_output['offset_mapping']            
+
+                if len(offset_mapping)!=len(output_tokens):
+                    print(f"{id} fuck")
+                    print(offset_mapping)
+                    print(output_tokens)
+                    
+
                 if lang=="AR":
                     output_tokens = [t[:max(1, len(t)//2)] for t in output_tokens]
 
-                dataset.append((id, model_input, output_tokens, output_logits))
+                dataset.append((id, model_input, output_text, offset_mapping, output_tokens, output_logits))
             else:
                 soft_labels = data.get("soft_labels", "?")
                 hard_labels = data.get("hard_labels", "?")
                 if soft_labels == "?" or hard_labels == "?":
                     continue
                 dataset.append((id, soft_labels, hard_labels))
-
-            # Skip if invalid
 
             idx += 1
 
@@ -143,7 +161,7 @@ def train_with_entropy(
         print(f"Epoch {epoch+1}/{num_epochs}")
         total_loss = 0.0
 
-        for (_, model_input, output_tokens, output_logits) in dataset:
+        for (_, model_input, output_text, offset_mapping, output_tokens, output_logits) in dataset:
             log_probs = torch.tensor(output_logits, dtype=torch.float)
             gating_probs = gating_net(log_probs)
 
@@ -494,7 +512,32 @@ if __name__ == "__main__":
         default=[
             'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
             'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl'
+            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
+            'data_sets/train_unlabeled/mushroom.zh-train_nolabel.v1.jsonl',
+            'data_sets/test_labeled/mushroom.ar-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.ca-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.cs-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.de-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.en-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.es-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.eu-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fa-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fi-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.fr-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.hi-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.it-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.sv-tst.v1.jsonl',
+            'data_sets/test_labeled/mushroom.zh-tst.v1.jsonl',
+            'data_sets/validation/mushroom.ar-val.v2.jsonl',
+            'data_sets/validation/mushroom.de-val.v2.jsonl',
+            'data_sets/validation/mushroom.en-val.v2.jsonl',
+            'data_sets/validation/mushroom.es-val.v2.jsonl',
+            'data_sets/validation/mushroom.fi-val.v2.jsonl',
+            'data_sets/validation/mushroom.fr-val.v2.jsonl',
+            'data_sets/validation/mushroom.hi-val.v2.jsonl',
+            'data_sets/validation/mushroom.it-val.v2.jsonl',
+            'data_sets/validation/mushroom.sv-val.v2.jsonl',
+            'data_sets/validation/mushroom.zh-val.v2.jsonl'
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', nargs='+', type=str,

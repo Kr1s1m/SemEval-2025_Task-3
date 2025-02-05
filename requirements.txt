@@ -1,6 +1,7 @@
 torch
 numpy
 transformers
+sentencepiece
 wandb
 datasets<3.0
 ipywidgets
