@@ -28,8 +28,8 @@ def try_load(filename, is_ref=False):
     return df.sort_values(by='id').to_dict(orient='records')
 
 
-def get_reference_data(ref_dir, lang):
-    return try_load(ref_dir / f'mushroom.{lang}-tst.v1.jsonl', is_ref=True)
+def get_reference_data(ref_dir, split, lang):
+    return try_load(ref_dir / f'mushroom.{lang}-{split}.v{(1, 2)[split=="val"]}.jsonl', is_ref=True)
 
 
 def check_aligned(pdict, rdict, fname):
@@ -61,9 +61,9 @@ def main(preds_file, ref_dir):
             raise RuntimeError(f'All files should be in the .jsonl format, but you submitted {fname.name}.')
         pred_dicts = try_load(fname)
         split, lang, _ = pred_dicts[0]['id'].split('-')
-        if split != 'tst':
-            raise RuntimeError(f"The format checker is only configured for test preds.")
-        ref_dicts = get_reference_data(ref_dir, lang)
+        if split != 'tst' and split != 'val':
+            raise RuntimeError(f"The format checker is only configured for test or validation preds.")
+        ref_dicts = get_reference_data(ref_dir, split, lang)
         for pdict, rdict in zip(pred_dicts, ref_dicts):
             check_aligned(pdict, rdict, fname.name)
         if lang in seen_langs:

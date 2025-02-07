@@ -28,27 +28,52 @@ def embed_input_text(text):
 def embed_output_token(token):
     return torch.from_numpy(sentence_transformer_model.encode(token))
 
+def cached_data_sets():
+    return "cached_data_sets"
 
-def from_jsonl(jsonl_path, gold=False):
+ #'data_sets/test_labeled/mushroom.zh-tst.v1.jsonl'
+ #'data_sets/validation/mushroom.ar-val.v2.jsonl'
+
+def from_jsonl(jsonl_path):
     dataset = []
     idx = 1
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
+    exceptions = []
+    mapping_mismatch = 0
+    path_split = jsonl_path.split("/")
+    file_name = path_split[len(path_split)-1]
+    parent_dir = path_split[0]
+    cache = False
+    if len(path_split)>1:
+        cache_path = jsonl_path.replace(parent_dir, cached_data_sets())
+    else:
+        cache_path = cached_data_sets()+"/"+jsonl_path
+
+    cache_path = cache_path.replace(file_name, "")
+    cache_file = cache_path+"/"+file_name
+    if os.path.exists(cache_file):
+        jsonl_path = cache_file
+        cache = True
+    else:
+        if not os.path.exists(cache_path):
+            os.makedirs(cache_path)
+
+    with open(jsonl_path, 'r', encoding='utf-8') as f, open(cache_file, 'a+', encoding='utf-8') as cache_f:
         for line in f:
             data = json.loads(line.strip())
             if not data:
                 continue
             # Extract needed fields
-            lang = data.get("lang", "")
-            id = data.get("id", f"train-{lang.lower()}-{idx}")
+            lang = data.get("lang", "").lower()
+            id = data.get("id", f"train-{lang}-{idx}")
             model_input = data.get("model_input", "")
-            if not gold:
-                model_id = data.get("model_id", "")
-                output_tokens = data.get("model_output_tokens", [])
-                output_logits = data.get("model_output_logits", [])
-                output_text = data.get("model_output_text", "")
-
+            model_id = data.get("model_id", "")
+            output_tokens = data.get("model_output_tokens", [])
+            output_logits = data.get("model_output_logits", [])
+            output_text = data.get("model_output_text", "")
+            # If cache of dataset is not available, perform data proccessing and save into cache
+            if not cache:
                 # Do some functional style black magic to fix CA data points (CA dataset was messy)
-                if lang=="CA" and id.split("-")[:2]==["tst", "ca"]:
+                if lang=="ca" and id.split("-")[:2]==["tst", "ca"]:
                     output_tokens = "".join(list(filter(lambda t: t!='[' and t!=']' and t!="'", output_tokens))).split(", ")
                     output_logits = list(map(float, "".join(list(filter(lambda l: l!='[' and l!=']' and l!="'", output_logits))).split(", ")))
                 
@@ -61,35 +86,80 @@ def from_jsonl(jsonl_path, gold=False):
                 filtered = [(t, l) for (t, l) in zip(output_tokens, output_logits) if not regex.match(t)]
                 output_tokens = [t for (t, _) in filtered]
                 output_logits = [l for (_, l) in filtered]
-
-                # Generate offset mapping for the specific model in the data point
+                
                 if model_id=="TheBloke/Mistral-7B-Instruct-v0.2-GGUF":
                     model_id="mistralai/Mistral-7B-Instruct-v0.2"
 
-                tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-                tokenized_output = tokenizer(output_text, return_offsets_mapping=True)
-                offset_mapping = tokenized_output['offset_mapping']            
+                if model_id=="AI-Sweden-Models/gpt-sw3-6.7b-v2-instruct-gguf":
+                    model_id="AI-Sweden-Models/gpt-sw3-6.7b-v2"
+
+                # Generate offset mapping for the specific model in the data point
+                offset_mapping = []
+                if id.split("-")[0]!="train":
+                    try:
+                        if model_id=='internlm/internlm2-chat-7b':
+                            raise RuntimeError(f"use_fast=False")
+                        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, use_fast=True)
+                        tokenized_output = tokenizer(output_text, return_offsets_mapping=True)
+                        offset_mapping = tokenized_output['offset_mapping']
+                    except Exception as e:
+                        exceptions.append((id, model_id, e))
+                        #print(f"{id} {model_id} {e}")
+
+                    # Clean (0, 0) technical mappings and other (x, y) zero character mappings, where x==y
+                    offset_mapping = list(filter(lambda o: o[0]!=o[1], offset_mapping))
+
+                    if not offset_mapping and lang=="ar":
+                        output_tokens = [t[:max(1, len(t)//2)] for t in output_tokens]
+
+                cached_json = {
+                    "lang": lang,
+                    "id": id,
+                    "model_input": model_input,
+                    "model_id": model_id,
+                    "model_output_tokens": output_tokens,
+                    "model_output_logits": output_logits,
+                    "model_output_text": output_text,
+                    "model_offset_mapping": offset_mapping
+                }
+                json_line = json.dumps(cached_json)
+                cache_f.write(json_line + '\n')
+            else:
+                offset_mapping = data.get("model_offset_mapping", [])
 
                 if len(offset_mapping)!=len(output_tokens):
-                    print(f"{id} fuck")
-                    print(offset_mapping)
-                    print(output_tokens)
-                    
-
-                if lang=="AR":
-                    output_tokens = [t[:max(1, len(t)//2)] for t in output_tokens]
-
-                dataset.append((id, model_input, output_text, offset_mapping, output_tokens, output_logits))
-            else:
-                soft_labels = data.get("soft_labels", "?")
-                hard_labels = data.get("hard_labels", "?")
-                if soft_labels == "?" or hard_labels == "?":
-                    continue
-                dataset.append((id, soft_labels, hard_labels))
-
+                    mapping_mismatch += 1
+                    #print(f"{id} mapping mismatch:")
+                    #print(offset_mapping)
+                    #print(output_tokens)
+            dataset.append((id, model_input, output_text, offset_mapping, output_tokens, output_logits))
             idx += 1
+    if dataset[0][0].split("-")[0]!="train":
+        print(f"{jsonl_path} mapping mismatch count: {mapping_mismatch} ({len(exceptions)} exceptions)")
 
     return dataset
+
+
+def labels_from_jsonl(jsonl_path):
+    labels = []
+    idx = 1
+
+    with open(jsonl_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line.strip())
+            if not data:
+                continue
+            # Extract needed fields
+            lang = data.get("lang", "").lower()
+            id = data.get("id", f"train-{lang}-{idx}")
+            soft_labels = data.get("soft_labels", "?")
+            hard_labels = data.get("hard_labels", "?")
+            if soft_labels == "?" or hard_labels == "?":
+                continue
+            labels.append((id, soft_labels, hard_labels))
+            idx += 1
+
+    return labels
 
 
 # -------------------------------------------------------------
@@ -127,7 +197,7 @@ def get_training_results(gating_net, dataset):
     for (id, model_input, output_text, offset_mapping, output_tokens, output_logits) in dataset:
         log_probs = torch.tensor(output_logits, dtype=torch.float)
         gating_probs = gating_net(log_probs).detach().cpu().numpy()
-        result.append((id, output_tokens, output_text, offset_mapping, gating_probs))
+        result.append((id, output_text, offset_mapping, output_tokens, gating_probs))
         #print(f"\nINPUT: {model_input}")
         #for token, gp in zip(output_tokens, gating_probs):
             #print(f"  {token} => gating_prob={gp:.3f}")
@@ -268,30 +338,34 @@ def split_list(a_list):
 
 def spread_all(zipped, threshold=0.8, spread_factor=0.1):
     new_zipped = zipped.copy()
-    for (id, output_text, offset_mapping, tokens, gating_probs) in zipped:
-        new_zipped.append((id, tokens, output_text, offset_mapping, spread_gating_probs(gating_probs, threshold, spread_factor)))
+    for (id, output_text, offset_mapping, output_tokens, gating_probs) in zipped:
+        new_zipped.append((id, output_text, offset_mapping, output_tokens, spread_gating_probs(gating_probs, threshold, spread_factor)))
 
     #returns a list which contains first the original zipped and then with spread probs
     return new_zipped
     
 def generate_span_groups(zipped, threshold):
     span_groups = []
-    for (id, output_text, offset_mapping, tokens, gating_probs) in zipped:
+    for (id, output_text, offset_mapping, output_tokens, gating_probs) in zipped:
         i = 0
         t = 0
+        text_len = len(output_text)
         span = None
         span_group = {'id': id, 'spans': []}
-        for token, gating_prob in zip(tokens, gating_probs):
+        for token, gating_prob in zip(output_tokens, gating_probs):
+            if offset_mapping and t>=len(offset_mapping):
+                continue
+            token_len = len(token) if not offset_mapping else abs(offset_mapping[t][0]-offset_mapping[t][1])
             if gating_prob >= threshold:
                 if span is None:
                     span = {
-                        'start': i,
-                        'end': i+len(token),
+                        'start': min(i, text_len),
+                        'end': min(i + token_len, text_len),
                         'prob': gating_prob,
                         'tokens': [token]
                     }
                 else:
-                    span['end'] = i
+                    span['end'] = min(i, text_len)
                     span['prob'] += gating_prob
                     span['tokens'].append(token)
                 t += 1
@@ -301,8 +375,8 @@ def generate_span_groups(zipped, threshold):
                     span_group['spans'].append(span)
                     span = None
                 t = 0
-            i += len(token)
-        span_groups.append(span_group)
+            i += token_len
+        span_groups.append({"id": id, "spans": list(filter(lambda s: s['start']!=s['end'], span_group['spans']))})
 
     return span_groups
 
@@ -390,6 +464,8 @@ def calculate_error(silver_labels, gold_labels):
 
 def main(args):
 
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     sources = args.data_path
     train_samples = []
     for s in sources:
@@ -419,7 +495,6 @@ def main(args):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = f"run-@{current_time}"
     output_path += "/" + run_dir
     os.makedirs(output_path)
@@ -459,7 +534,7 @@ def main(args):
         span_groups = generate_span_groups(zipped_spread, prob_threshold)
         predictions_classic, predictions_spread = generate_predictions(span_groups)
 
-        gold_labels = from_jsonl(path, gold=True)
+        gold_labels = labels_from_jsonl(path)
 
         error_classic, error_spread = calculate_error_pair(predictions_classic, predictions_spread, gold_labels)
         errors_classic[infix+"-"+lang] = error_classic
@@ -510,39 +585,38 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="")
     parser.add_argument('--data_path', nargs='+', type=str,
         default=[
-            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
-            'data_sets/train_unlabeled/mushroom.zh-train_nolabel.v1.jsonl',
-            'data_sets/test_labeled/mushroom.ar-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.ca-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.cs-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.de-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.en-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.es-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.eu-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.fa-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.fi-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.fr-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.hi-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.it-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.sv-tst.v1.jsonl',
-            'data_sets/test_labeled/mushroom.zh-tst.v1.jsonl',
-            'data_sets/validation/mushroom.ar-val.v2.jsonl',
-            'data_sets/validation/mushroom.de-val.v2.jsonl',
-            'data_sets/validation/mushroom.en-val.v2.jsonl',
-            'data_sets/validation/mushroom.es-val.v2.jsonl',
-            'data_sets/validation/mushroom.fi-val.v2.jsonl',
-            'data_sets/validation/mushroom.fr-val.v2.jsonl',
-            'data_sets/validation/mushroom.hi-val.v2.jsonl',
-            'data_sets/validation/mushroom.it-val.v2.jsonl',
-            'data_sets/validation/mushroom.sv-val.v2.jsonl',
-            'data_sets/validation/mushroom.zh-val.v2.jsonl'
+            'data_sets/train_unlabeled/mushroom.en-train_nolabel.v1.jsonl'#,
+            #'data_sets/train_unlabeled/mushroom.es-train_nolabel.v1.jsonl',
+            #'data_sets/train_unlabeled/mushroom.fr-train_nolabel.v1.jsonl',
+            #'data_sets/train_unlabeled/mushroom.zh-train_nolabel.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.ar-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.ca-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.cs-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.de-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.en-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.es-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.eu-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.fa-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.fi-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.fr-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.hi-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.it-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.sv-tst.v1.jsonl',
+            #'data_sets/test_labeled/mushroom.zh-tst.v1.jsonl',
+            #'data_sets/validation/mushroom.ar-val.v2.jsonl',
+            #'data_sets/validation/mushroom.de-val.v2.jsonl',
+            #'data_sets/validation/mushroom.en-val.v2.jsonl',
+            #'data_sets/validation/mushroom.es-val.v2.jsonl',
+            #'data_sets/validation/mushroom.fi-val.v2.jsonl',
+            #'data_sets/validation/mushroom.fr-val.v2.jsonl',
+            #'data_sets/validation/mushroom.hi-val.v2.jsonl',
+            #'data_sets/validation/mushroom.it-val.v2.jsonl',
+            #'data_sets/validation/mushroom.sv-val.v2.jsonl',
+            #'data_sets/validation/mushroom.zh-val.v2.jsonl'
         ],
         help="Path to the training data")
     parser.add_argument('--test_path', nargs='+', type=str,
-        default=[
-            
+        default=[     
             'data_sets/test_labeled/mushroom.ar-tst.v1.jsonl',
             'data_sets/test_labeled/mushroom.ca-tst.v1.jsonl',
             'data_sets/test_labeled/mushroom.cs-tst.v1.jsonl',
