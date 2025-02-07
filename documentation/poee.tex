@@ -1,0 +1,80 @@
+\documentclass[12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{latexsym,amsfonts,amssymb,amsthm,amsmath}
+\usepackage[T1, T2A]{fontenc}% T2A for Cyrillic font encoding
+\usepackage[bulgarian]{babel}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{emoji}
+\usepackage{hyperref}
+\usepackage[
+backend=biber,
+style=alphabetic,
+]{biblatex}
+\newcommand{\cyrchar}[1]{\foreignlanguage{bulgarian}{#1}}
+
+
+\graphicspath{ {./images/} }
+
+
+\setlength{\parindent}{0in}
+\setlength{\oddsidemargin}{0in}
+\setlength{\textwidth}{6.5in}
+\setlength{\textheight}{8.8in}
+\setlength{\topmargin}{0in}
+\setlength{\headheight}{18pt}
+
+\begin{document}
+	
+	\title{ Подходи за обработка на естествен език \newline SemEval-2025 Task-3 — Mu-SHROOM  \newline \hline}
+	
+	
+	\author{Кристиян Симов, ф.н. 4MI3400288 \\ Цветан Цветанов, ф.н. 4MI3400570 \\ Изкуствен интелект}
+	\maketitle
+	
+	% \begin{Logo}
+		\begin{figure}[H]
+			\centering
+			\includegraphics[width=0.25\linewidth]{clement-ohrid-logo.png}
+		\end{figure}
+		
+		\begin{figure}[H]
+			\centering
+			\includegraphics[width=0.25\linewidth]{fmi-logo.jpg}
+		\end{figure}
+		% \end{Logo}
+	
+	
+	\vspace{0.5in}
+	\pagebreak
+	
+	\section{Въведение}
+	
+	Езиковите модели са вещи в естествените езици и звучат убедително, но понякога генерират грешни и лъжовни твърдения, които нямат реална подкрепа с факти. 
+
+	Халюцинирането е един от големите все още неразрешени проблеми  на големите езикови модели.  Задачата  Mu-SHROOM в изданието на SemEval от 2025 е продължение на SHROOM от предишното издание. През 2024 година задачата пред участниците е била да класифицират дали даден текст е халюцинация (да или не). Промяната в сегашното издание е, че се очаква да се предскаже началото и края на халюцинация в изходния текст на конкретен модел.
+	
+
+	\section{Данни}
+	
+	Използвани са единствено публично достъпни данни от страницата на задачата. Не е правен опит да се генерират синтетични данни. Организаторите са подготвили текстови данни за трениране, тестване и валидация на 14 различни езика в jsonl формат. 
+	
+	\section{Метод}
+	
+	\subsection{Обработка на данните}
+	
+	\subsection{Алгоритми}
+	
+	\section{Експерименти}
+	
+	\section{Резултати}
+	
+	\section{Заключение и бъдеща работа}
+	
+	\pagebreak
+	\section{Индивидуален принос}
+	
+	
+\end{document}
