@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import json
+import time
 import argparse
 import torch
 import torch.nn as nn
@@ -227,6 +228,8 @@ def train_with_entropy(
     gating_net = GatingNetwork()
     optimizer = optim.Adam(gating_net.parameters(), learning_rate)
 
+    training_start = time.time()
+
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         total_loss = 0.0
@@ -275,7 +278,9 @@ def train_with_entropy(
         avg_loss = total_loss / len(dataset)
         print(f"  Avg loss: {avg_loss:.4f}")
 
-    print("\nFinished training.")
+    training_end = time.time()
+    print(f"Training finished in {training_end - training_start} seconds")
+
     return gating_net
 
 
@@ -646,7 +651,7 @@ if __name__ == "__main__":
     parser.add_argument('--test_lang', nargs='+', type=str,
         default=['ar', 'ca', 'cs', 'de', 'en', 'es', 'eu', 'fa', 'fi', 'fr', 'hi', 'it', 'sv', 'zh', 'ar', 'de', 'en', 'es', 'fi', 'fr', 'hi', 'it', 'sv', 'zh'],
         help="List of test languages")
-    parser.add_argument('--num_epochs', type=int, default=1)
+    parser.add_argument('--num_epochs', type=int, default=10)
     parser.add_argument('--lambda_penalty', type=float, default=1.2)
     parser.add_argument('--lambda_entropy', type=float, default=0.5)
     parser.add_argument('--learning_rate', type=float, default=0.001)
